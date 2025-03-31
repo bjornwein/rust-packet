@@ -37,7 +37,7 @@ use crate::ip::Protocol;
 /// enclosing IP packet, one has to be given.
 pub fn checksum<B: AsRef<[u8]>>(ip: &ip::Packet<B>, buffer: &[u8]) -> u16 {
     use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-    use std::io::Cursor;
+    use std::io::{Cursor, Seek, SeekFrom};
 
     let buffer_length = buffer.len();
     let mut prefix = [0u8; 40];
@@ -85,6 +85,7 @@ pub fn checksum<B: AsRef<[u8]>>(ip: &ip::Packet<B>, buffer: &[u8]) -> u16 {
     //   read_u16 is based on `read_exact` which will throw an eof error when buffer is not filled.
     if bytes_read != buffer_length {
         // Deal with remaining 1 byte
+        buffer.seek(SeekFrom::End(-1)).unwrap();
         let rem = buffer.read_u8().unwrap() as u32;
         result += rem << 8;
     }

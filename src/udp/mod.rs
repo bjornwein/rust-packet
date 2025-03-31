@@ -29,8 +29,9 @@ use crate::ip::Protocol;
 /// enclosing IP packet, one has to be given.
 pub fn checksum<B: AsRef<[u8]>>(ip: &ip::Packet<B>, buffer: &[u8]) -> u16 {
     use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-    use std::io::Cursor;
+    use std::io::{Cursor, Seek, SeekFrom};
 
+    let buffer_length = buffer.len();
     let mut prefix = [0u8; 40];
     match *ip {
         ip::Packet::V4(ref packet) => {
@@ -64,7 +65,10 @@ pub fn checksum<B: AsRef<[u8]>>(ip: &ip::Packet<B>, buffer: &[u8]) -> u16 {
         }
     }
 
+    let mut bytes_read = 0;
     while let Ok(value) = buffer.read_u16::<BigEndian>() {
+        bytes_read += 2;
+
         // Skip checksum field.
         if buffer.position() == 8 {
             continue;
@@ -77,7 +81,9 @@ pub fn checksum<B: AsRef<[u8]>>(ip: &ip::Packet<B>, buffer: &[u8]) -> u16 {
         }
     }
 
-    if let Ok(value) = buffer.read_u8() {
+    if bytes_read != buffer_length {
+        buffer.seek(SeekFrom::End(-1)).unwrap();
+        let value = buffer.read_u8().unwrap();
         // if we have a trailing byte, make a padded 16-bit value.
         let value = (value as u16) << 8;
 
@@ -107,6 +113,27 @@ mod tests {
             0x63, 0x63, 0x6c, 0x65, 0x6c, 0x6c, 0x61, 0x6e, 0x02, 0x63, 0x73, 0x05, 0x6d, 0x69,
             0x61, 0x6d, 0x69, 0x03, 0x65, 0x64, 0x75, 0x00, 0x00, 0x01, 0x00, 0x01,
         ];
+
+        let ip = ip::v4::Packet::new(&raw[..]).unwrap();
+        let udp = udp::Packet::new(ip.payload()).unwrap();
+
+        assert_eq!(checksum(&ip::Packet::V4(ip), ip.payload()), udp.checksum());
+    }
+
+    // TODO: test with a real captured packet with known good checksum
+    #[test]
+    fn test_checksum_on_odd_length() {
+        let raw = [
+            // IPv4
+            0x45, 0x00, 0x00, 0x43, 0xad, 0x0b, 0x00, 0x00, 0x40, 0x11, 0x72, 0x72, 0xac, 0x14,
+            0x02, 0xfd, 0xac, 0x14, 0x00, 0x06, // UDP
+            0xe5, 0x87, 0x00, 0x35, 0x00, 0x2f, 0xe3, 0x23, // data
+            0xab, 0xc9, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x6d,
+            0x63, 0x63, 0x6c, 0x65, 0x6c, 0x6c, 0x61, 0x6e, 0x02, 0x63, 0x73, 0x05, 0x6d, 0x69,
+            0x61, 0x6d, 0x69, 0x03, 0x65, 0x64, 0x75, 0x00, 0x00, 0x01, 0x00,
+        ];
+
+        println!("Len: {} {:x}", raw.len(), raw.len());
 
         let ip = ip::v4::Packet::new(&raw[..]).unwrap();
         let udp = udp::Packet::new(ip.payload()).unwrap();
